@@ -9,11 +9,13 @@
  * `./src/main.js` using webpack. This gives us some performance wins.
  */
 import path from 'path';
-import { app, BrowserWindow, shell, ipcMain } from 'electron';
+import { app, ipcMain as ipc, BrowserWindow, shell, ipcMain } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import log from 'electron-log';
 import MenuBuilder from './menu';
 import { resolveHtmlPath } from './util';
+import windowManager from './helpers/main-window';
+import apiManager from './managers/api-manager';
 
 class AppUpdater {
   constructor() {
@@ -115,7 +117,11 @@ const createWindow = async () => {
 /**
  * Add event listeners...
  */
-
+if (process.env.NODE_ENV === undefined) process.env.NODE_ENV = 'production';
+const shouldNotQuit = app.requestSingleInstanceLock();
+if (!shouldNotQuit) {
+  app.quit();
+}
 app.on('window-all-closed', () => {
   // Respect the OSX convention of having the application in memory even
   // after all windows have been closed
@@ -124,14 +130,19 @@ app.on('window-all-closed', () => {
   }
 });
 
-app
-  .whenReady()
-  .then(() => {
-    createWindow();
-    app.on('activate', () => {
-      // On macOS it's common to re-create a window in the app when the
-      // dock icon is clicked and there are no other windows open.
-      if (mainWindow === null) createWindow();
-    });
-  })
-  .catch(console.log);
+app.on('ready', async () => {
+  await windowManager.createAuthWindow();
+});
+app.on('activate', () => createWindow());
+app.on('window-all-closed', () => {
+  app.exit();
+  process.exit(0);
+});
+ipc.on('login-key', async (e, key) => {
+  if (await apiManager.activateKey(key)) {
+    await windowManager.closeAuthWindow();
+    await createWindow();
+  } else {
+    // windowManager.sendStatusToLogin('Key invalid or needs to be deactivated.');
+  }
+});
